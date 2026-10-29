@@ -1,0 +1,5 @@
+payer_key,payer_code,payer_name,payer_group
+1,MCR,Medicare,Government
+2,MCD,Medicaid,Government
+3,COM,Commercial,Commercial
+4,SELF,Self-pay,Self-pay

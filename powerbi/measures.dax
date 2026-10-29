@@ -1,0 +1,140 @@
+// ============================================================================
+// Hospital Operations KPI: DAX measures
+// Create a blank table called _Measures (Home > Enter data > OK), then add each
+// measure below to it with Modeling > New measure. Display folders are noted
+// above each group (Model view > select measure > Properties > Display folder).
+//
+// Tables (from data/powerbi/*.csv or the PostgreSQL views):
+//   Date, Department, Payer, Patient, Daily Census, Inpatient Stays, ED Visits
+// Expected values for every measure are in reports/reference_kpis.md.
+// ============================================================================
+
+
+// ---------- Display folder: Capacity ----------
+
+Patient Days =
+SUM ( 'Daily Census'[midnight_census] )
+
+Bed Days =
+SUM ( 'Daily Census'[staffed_beds] )
+
+Occupancy % =
+DIVIDE ( [Patient Days], [Bed Days] )
+// Format: Percentage, 1 decimal. Ratio of sums, never an average of daily percentages.
+
+Average Daily Census =
+AVERAGEX ( VALUES ( 'Date'[calendar_date] ), [Patient Days] )
+
+Peak Daily Census =
+MAXX ( VALUES ( 'Date'[calendar_date] ), [Patient Days] )
+
+Days at or Above 95% =
+COUNTROWS (
+    FILTER ( VALUES ( 'Date'[calendar_date] ), [Occupancy %] >= 0.95 )
+)
+
+Occupancy % Prior Month =
+CALCULATE ( [Occupancy %], DATEADD ( 'Date'[calendar_date], -1, MONTH ) )
+
+Occupancy Change (pp) =
+VAR cur = [Occupancy %]
+VAR prev = [Occupancy % Prior Month]
+RETURN IF ( NOT ISBLANK ( cur ) && NOT ISBLANK ( prev ), ( cur - prev ) * 100 )
+// Format: Decimal, 1 place. Percentage points, not percent change.
+
+Medicine Occupancy % =
+CALCULATE ( [Occupancy %], Department[dept_code] = "MED" )
+// Used on the ED page, where Department does not filter ED Visits.
+
+Occupancy Color =
+SWITCH (
+    TRUE (),
+    ISBLANK ( [Occupancy %] ), BLANK (),
+    [Occupancy %] >= 0.95, "#C0392B",    // red: no surge capacity
+    [Occupancy %] >= 0.85, "#E6A100",    // amber: above the 85% safe-occupancy threshold
+    "#1E8449"                            // green
+)
+// Use with conditional formatting > Field value.
+
+
+// ---------- Display folder: Inpatient flow ----------
+
+Admissions =
+CALCULATE (
+    COUNTROWS ( 'Inpatient Stays' ),
+    USERELATIONSHIP ( 'Inpatient Stays'[admit_date_key], 'Date'[date_key] )
+)
+// The active relationship is on discharge date, so admissions activate the inactive one.
+
+Discharges =
+COUNT ( 'Inpatient Stays'[discharge_date_key] )
+// COUNT skips blanks: patients still in hospital have no discharge date.
+
+ALOS (days) =
+DIVIDE ( SUM ( 'Inpatient Stays'[los_days] ), [Discharges] )
+
+ED Admission Share =
+DIVIDE (
+    CALCULATE ( [Admissions], 'Inpatient Stays'[admission_source] = "ED" ),
+    [Admissions]
+)
+
+
+// ---------- Display folder: Readmissions ----------
+
+Index Discharges =
+SUM ( 'Inpatient Stays'[is_index_discharge] )
+
+Readmissions 30d =
+SUM ( 'Inpatient Stays'[readmitted_30d] )
+
+Readmission Rate 30d =
+DIVIDE ( [Readmissions 30d], [Index Discharges] )
+// Blank for discharges in the last 30 days of data: their follow-up window is incomplete.
+
+Readmission Rate 30d (Rolling 3M) =
+CALCULATE (
+    [Readmission Rate 30d],
+    DATESINPERIOD ( 'Date'[calendar_date], MAX ( 'Date'[calendar_date] ), -3, MONTH )
+)
+
+Readmission Rate vs Hospital (pp) =
+VAR hospital =
+    CALCULATE ( [Readmission Rate 30d], REMOVEFILTERS ( Department ) )
+RETURN ( [Readmission Rate 30d] - hospital ) * 100
+
+
+// ---------- Display folder: Emergency Department ----------
+
+ED Visits =
+COUNTROWS ( 'ED Visits' )
+
+Median Door-to-Provider (min) =
+MEDIAN ( 'ED Visits'[door_to_provider_min] )
+
+Median ED Length of Stay (hrs) =
+DIVIDE ( MEDIAN ( 'ED Visits'[ed_los_min] ), 60 )
+
+Median Boarding (hrs) =
+DIVIDE ( MEDIAN ( 'ED Visits'[boarding_min] ), 60 )
+// Boarding = admit decision to leaving the ED. Blank for patients who were not admitted, so MEDIAN ignores them.
+
+LWBS Rate =
+DIVIDE ( SUM ( 'ED Visits'[is_lwbs] ), [ED Visits] )
+
+ED Admit Rate =
+DIVIDE ( SUM ( 'ED Visits'[is_admitted] ), [ED Visits] )
+
+ED Visits per Day =
+DIVIDE ( [ED Visits], DISTINCTCOUNT ( 'Date'[calendar_date] ) )
+
+
+// ---------- Display folder: Labels ----------
+
+Report Period Label =
+VAR first_day = MIN ( 'Date'[calendar_date] )
+VAR last_day = MAX ( 'Date'[calendar_date] )
+RETURN FORMAT ( first_day, "mmm d, yyyy" ) & " – " & FORMAT ( last_day, "mmm d, yyyy" )
+
+Department Title =
+"Bed occupancy: " & SELECTEDVALUE ( Department[dept_name], "All departments" )

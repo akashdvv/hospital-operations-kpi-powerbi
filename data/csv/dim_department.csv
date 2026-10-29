@@ -1,0 +1,8 @@
+department_key,dept_code,dept_name,service_line
+1,MED,General Medicine,Medicine
+2,CARD,Cardiology,Medicine
+3,ICU,Intensive Care,Critical Care
+4,SURG,General Surgery,Surgery
+5,ORTH,Orthopedics,Surgery
+6,OB,Obstetrics,Women & Children
+7,PEDS,Pediatrics,Women & Children
